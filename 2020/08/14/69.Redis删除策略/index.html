@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.2.1">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+  <meta name="google-site-verification" content="UA-173930550-1">
+  <meta name="baidu-site-verification" content="YzvLjKFuD8DEm8Je">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.css">
+  <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/pace/1.0.2/themes/blue/pace-theme-minimal.min.css">
+  <script src="//cdnjs.cloudflare.com/ajax/libs/pace/1.0.2/pace.min.js"></script>
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"yanganlin.com","root":"/","scheme":"Gemini","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":true,"show_result":true,"style":"flat"},"back2top":{"enable":true,"sidebar":false,"scrollpercent":true},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":true,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},"path":"search.xml"};
+  </script>
+
+  <meta name="description" content="缓存预热在高请求之前，做好一系列措施，保证大量用户数量点击造成灾难。  请求数量较高 主从之间数据吞吐量较大，数据同步操作频度较高  缓存预热解决方案前置准备工作：  日常例行统计数据访问记录，统计访问频度较高的热点数据 利用LRU数据删除策略，构建数据留存队列例如：storm与kafka配合  准备工作：  将统计结果中的数据分类，根据级别，redis优先加载级别较高的热点数据 利用分布式多服">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Redis删除策略">
+<meta property="og:url" content="https://yanganlin.com/2020/08/14/69.Redis%E5%88%A0%E9%99%A4%E7%AD%96%E7%95%A5/index.html">
+<meta property="og:site_name" content="木木在唱歌">
+<meta property="og:description" content="缓存预热在高请求之前，做好一系列措施，保证大量用户数量点击造成灾难。  请求数量较高 主从之间数据吞吐量较大，数据同步操作频度较高  缓存预热解决方案前置准备工作：  日常例行统计数据访问记录，统计访问频度较高的热点数据 利用LRU数据删除策略，构建数据留存队列例如：storm与kafka配合  准备工作：  将统计结果中的数据分类，根据级别，redis优先加载级别较高的热点数据 利用分布式多服">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195111.jpeg">
+<meta property="og:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195122.png">
+<meta property="article:published_time" content="2020-08-13T16:00:00.000Z">
+<meta property="article:modified_time" content="2021-07-01T13:17:56.419Z">
+<meta property="article:author" content="Anthony">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195111.jpeg">
+
+<link rel="canonical" href="https://yanganlin.com/2020/08/14/69.Redis%E5%88%A0%E9%99%A4%E7%AD%96%E7%95%A5/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>Redis删除策略 | 木木在唱歌</title>
+  
+    <script async src="https://www.googletagmanager.com/gtag/js?id=UA-173930550-1"></script>
+    <script>
+      if (CONFIG.hostname === location.hostname) {
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'UA-173930550-1');
+      }
+    </script>
+
+
+  <script>
+    var _hmt = _hmt || [];
+    (function() {
+      var hm = document.createElement("script");
+      hm.src = "https://hm.baidu.com/hm.js?f78a539021012b85bff6cabb7ad98ab4";
+      var s = document.getElementsByTagName("script")[0];
+      s.parentNode.insertBefore(hm, s);
+    })();
+  </script>
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">木木在唱歌</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+        <i class="fa fa-search fa-fw fa-lg"></i>
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-user fa-fw"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档</a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+</nav>
+
+
+
+  <div class="search-pop-overlay">
+    <div class="popup search-popup">
+        <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocapitalize="off"
+           placeholder="搜索..." spellcheck="false"
+           type="search" class="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result">
+  <div id="no-result">
+    <i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>
+  </div>
+</div>
+
+    </div>
+  </div>
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+  <div class="reading-progress-bar"></div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="https://yanganlin.com/2020/08/14/69.Redis%E5%88%A0%E9%99%A4%E7%AD%96%E7%95%A5/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="Anthony">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="木木在唱歌">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Redis删除策略
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-08-14 00:00:00" itemprop="dateCreated datePublished" datetime="2020-08-14T00:00:00+08:00">2020-08-14</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Redis/" itemprop="url" rel="index"><span itemprop="name">Redis</span></a>
+                </span>
+            </span>
+
+          
+  
+  <span class="post-meta-item">
+    
+      <span class="post-meta-item-icon">
+        <i class="far fa-comment"></i>
+      </span>
+      <span class="post-meta-item-text">Disqus：</span>
+    
+    <a title="disqus" href="/2020/08/14/69.Redis%E5%88%A0%E9%99%A4%E7%AD%96%E7%95%A5/#disqus_thread" itemprop="discussionUrl">
+      <span class="post-comments-count disqus-comment-count" data-disqus-identifier="2020/08/14/69.Redis删除策略/" itemprop="commentCount"></span>
+    </a>
+  </span>
+  
+  
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p><img src="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195111.jpeg" alt=""></p>
+<h2 id="缓存预热"><a href="#缓存预热" class="headerlink" title="缓存预热"></a>缓存预热</h2><p>在高请求之前，做好一系列措施，保证大量用户数量点击造成灾难。</p>
+<ol>
+<li>请求数量较高</li>
+<li>主从之间数据吞吐量较大，数据同步操作频度较高</li>
+</ol>
+<h3 id="缓存预热解决方案"><a href="#缓存预热解决方案" class="headerlink" title="缓存预热解决方案"></a>缓存预热解决方案</h3><p>前置准备工作：</p>
+<ol>
+<li>日常例行统计数据访问记录，统计访问频度较高的热点数据</li>
+<li>利用LRU数据删除策略，构建数据留存队列<br>例如：storm与kafka配合</li>
+</ol>
+<p>准备工作：</p>
+<ol>
+<li>将统计结果中的数据分类，根据级别，redis优先加载级别较高的热点数据</li>
+<li>利用分布式多服务器同时进行数据读取，提速数据加载过程</li>
+</ol>
+<p>实施：</p>
+<ol>
+<li>使用脚本程序固定出大数据预热过程</li>
+<li>如果条件允许，使用CDN（内容分发网络），效果会更好</li>
+</ol>
+<p>缓存预热总结：<br>缓存预热就是系统启动前，提前将相关的缓存数据直接加载到缓存系统。避免在用户请求的时候，先查询数据库，然后再将数据缓存的问题！用户直接查询事先被预热的缓存数据!</p>
+<h2 id="缓存雪崩"><a href="#缓存雪崩" class="headerlink" title="缓存雪崩"></a>缓存雪崩</h2><ol>
+<li>系统平稳运行过程中，忽然数据库连接量激增</li>
+<li>应用服务器无法及时请求</li>
+<li>大量408，500错误页面出现</li>
+<li>客户反复刷新页面获取数据</li>
+<li>数据库崩溃</li>
+<li>应用服务器崩溃</li>
+<li>重启应用服务器无效</li>
+<li>Redis服务器崩溃</li>
+<li>Redis集群崩溃</li>
+<li>重启数据之后再次被瞬间流量放倒</li>
+</ol>
+<h3 id="问题排查"><a href="#问题排查" class="headerlink" title="问题排查"></a>问题排查</h3><p>简介：缓存同一时间大面积的失效，所以，后面的请求都会落到数据库上，造成数据库短时间内承受大量请求而崩掉</p>
+<ol>
+<li>在一个较短的时间内，缓存中较多的key集中过期</li>
+<li>此周期内请求访问过期的数据，redis未命中，redis向数据库获取数据</li>
+<li>数据库同时接受到大量的请求无法即时处理</li>
+<li>Redis大量请求被积压，开始出现超时现象</li>
+<li>数据库流量激增，数据库崩溃</li>
+<li>重启后任然面对缓存中无数据可用</li>
+<li>Redis服务器资源被严重占用，Redis服务器崩溃</li>
+<li>Redis集群呈现崩塌，集群瓦解</li>
+<li>应用服务器无法即时得到数据响应请求，来自客户端的请求数量越来越多，应用服务器崩溃</li>
+<li>应用服务器，redis，数据库全部重启，效果不理想</li>
+</ol>
+<h3 id="问题分析"><a href="#问题分析" class="headerlink" title="问题分析"></a>问题分析</h3><ul>
+<li>短时间范围内</li>
+<li>大量key集中过期</li>
+</ul>
+<h3 id="解决方案（道）"><a href="#解决方案（道）" class="headerlink" title="解决方案（道）"></a>解决方案（道）</h3><ol>
+<li>更多的页面静态化处理</li>
+<li>构建多级缓存架构<br>Nginx缓存+redis缓存+ehcache缓存</li>
+<li>检测Mysql严重耗时业务进行优化<br>对数据库的瓶颈排查：例如超时查询、耗时较高事务等</li>
+<li>灾难预警机制<br>监控redis服务器性能指标<br>1、CPU占用、CPU使用率<br>2、内存容量<br>3、查询平均响应时间<br>4、线程数</li>
+<li>限流、降级<br>短时间范围内习生一些客户体验，限制一部分请求访问，降低应用服务器压力，待业务低速运转后再逐渐放开访问</li>
+</ol>
+<h3 id="解决方案（术）"><a href="#解决方案（术）" class="headerlink" title="解决方案（术）"></a>解决方案（术）</h3><ol>
+<li>LRU与LFU切换</li>
+<li>数据有效期策略调整<br>根据业务数据有效期进行分类错峰，A类90分钟，B类80分钟，C类70分钟<br>过期时间使用固定形式+随机值的形式，稀释集中到期的key的数量</li>
+<li>超热数据使用永久key</li>
+<li>定期维护（自动+人工）<br>对即将过期数据做访问量分析，确认是否演示，配合访问量统计，做热点数据的延时</li>
+<li>加锁 慎用！！！！！！！</li>
+</ol>
+<p>总结<br>缓存雪崩式瞬间过期数量太大，导致对数据库服务器造成压力。如果能有效避免过期时间集中，可以有效解决雪崩现象的出现（约40%）。配合其他策略一起使用，并监控服务器的运行数据，根据运行巨鹿做快速调整</p>
+<p><img src="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195122.png" alt=""></p>
+<h2 id="缓存击穿"><a href="#缓存击穿" class="headerlink" title="缓存击穿"></a>缓存击穿</h2><h3 id="数据库服务器崩溃（2）"><a href="#数据库服务器崩溃（2）" class="headerlink" title="数据库服务器崩溃（2）"></a>数据库服务器崩溃（2）</h3><ol>
+<li>系统平稳运行过程中</li>
+<li>数据库连接量瞬间激增</li>
+<li>Redis服务器无大量key过期</li>
+<li>Redis内存平稳，无波动</li>
+<li>Redis服务器CPU正常</li>
+<li>数据库崩溃</li>
+</ol>
+<h3 id="问题排查-1"><a href="#问题排查-1" class="headerlink" title="问题排查"></a>问题排查</h3><ol>
+<li>Redis中某个key过期，该key访问量巨大</li>
+<li>多个数据请求从服务器直接压到Redis后，均为命中</li>
+<li>Redis在短时间内发起了大量对数据库中同一个数据的访问</li>
+</ol>
+<p><strong>问题分析</strong></p>
+<ul>
+<li>单个key高热数据</li>
+<li>key过期</li>
+</ul>
+<h3 id="解决方案（术）-1"><a href="#解决方案（术）-1" class="headerlink" title="解决方案（术）"></a>解决方案（术）</h3><ol>
+<li>预先设定<br>以电商为例，每个商家根据店铺等级，指定若干款主打商品，在购物节期间，加大此类信息key的过期时常<br>注意：购物节不仅仅指当天，以及后续若干天，访问峰值呈现逐渐降低趋势</li>
+<li>现场调整<br>监控访问量，对自然流量激增的数据延长过期时间或设置为永久性key</li>
+<li>后台刷新数据<br>启动定时任务，高峰期来临之前，刷新数据有效期，保存不丢失</li>
+<li>二级缓存<br>设置不同的失效时间，保障不会被同时淘汰就行</li>
+<li>加锁<br>分布式锁，防止被击穿，但是要注意也是性能瓶颈，慎重！！！！！！！！</li>
+</ol>
+<p>总结：<br>缓存击穿就是单个高热数据过期的瞬间，数据访问较大，未命中redis后，发起了大量对同一数据的数据库访问，导致对数据库服务器造成压力。应对策略应该在业务数据分析与预防方面进行，配合运行监控测试与即时调整策略，毕竟单个key的过期监控难度较高，配合雪崩处理策略即可</p>
+<h2 id="缓存穿透"><a href="#缓存穿透" class="headerlink" title="缓存穿透"></a>缓存穿透</h2><h3 id="数据库服务器崩溃（3）"><a href="#数据库服务器崩溃（3）" class="headerlink" title="数据库服务器崩溃（3）"></a>数据库服务器崩溃（3）</h3><p>简介：一般是黑客故意去请求缓存中不存在的数据，导致所有的请求都落到数据库上，造成数据库短时间内承受大量请求而崩掉。</p>
+<ol>
+<li>系统平稳运行过程中</li>
+<li>应用服务器流量随时间增量较大</li>
+<li>Redis服务器命中率随时间逐步降低</li>
+<li>Redis内存平稳，内存无压力</li>
+<li>Redis服务器CPU占用激增</li>
+<li>数据库服务器压力激增</li>
+<li>数据库崩溃</li>
+</ol>
+<h3 id="问题排查-2"><a href="#问题排查-2" class="headerlink" title="问题排查"></a>问题排查</h3><ol>
+<li>redis中大面积出现未命中</li>
+<li>出现非正常URL访问</li>
+</ol>
+<p><strong>问题分析</strong></p>
+<ul>
+<li>获取的数据在数据库中也不存在，数据库查询未得到对应数据</li>
+<li>Redis获取到null数据未进行持久化，直接返回</li>
+<li>下次此类数据到达重复上述过程</li>
+<li>出现黑客攻击服务器</li>
+</ul>
+<h3 id="解决方法（术）"><a href="#解决方法（术）" class="headerlink" title="解决方法（术）"></a>解决方法（术）</h3><ol>
+<li>缓存null<br>对查询结果为null的数据进行缓存（长期使用，定期清理），设定短时限，例如30-60秒，最高五分钟</li>
+<li>白名单策略<br>提前预热各种分类数据id对应的bitmaps,id作为bitmaps的offset,相当于设置了数据白名单。当加载正常数据后放型，加载异常数据时直接拦截（效率偏低）<br>使用布隆过滤器（有关布隆过滤器的命中问题对当前状态可以忽略）</li>
+<li>实时监控<br>试试监控redis命中率（业务正常范围时，通常回有一个波动值）与null数据的占比<br>非活动时间波动：通常检测3-5倍，超过5倍纳入重点排查对象<br>活动时间波动：通常检测10-50倍，超过50倍纳入重点排查对象<br>根据背书不同，启动不同的排查流程。然后使用黑名单进行防控（运营）</li>
+<li>key加密<br>问题出现后，临时启动防灾业务key,对key进行业务层传输加密服务，设定校验程序，过来的key校验<br>例如每天随机分配60个加密串，挑选2-3个，混淆到页面数据id中，发现访问key不满足规则，驳回数据访问</li>
+</ol>
+<p><strong>总结</strong><br>缓存穿透是访问了不存在的数据，跳过了合法数据的redis数据缓存阶段，每次访问数据库，导致对数据库服务器造成压力。通常此类数据的出现量是一个较低的值，当出现此类情况以毒攻毒，并即时报警。应对策略应该在临时预案防范方面多做文章<br>无论是黑名单还是白名单，都是对整体系统的压力，警报解除后尽快移除</p>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/08/14/67.Redis%E6%8C%81%E4%B9%85%E5%8C%96/" rel="prev" title="Redis持久化">
+      <i class="fa fa-chevron-left"></i> Redis持久化
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/08/14/71.Redis%E7%BC%93%E5%AD%98%E9%A2%84%E7%83%AD,%E9%9B%AA%E5%B4%A9,%E5%87%BB%E7%A9%BF,%E7%A9%BF%E9%80%8F/" rel="next" title="Redis缓存预热,雪崩,击穿,穿透">
+      Redis缓存预热,雪崩,击穿,穿透 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+    
+  <div class="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript>
+    </div>
+  </div>
+  
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#缓存预热"><span class="nav-number">1.</span> <span class="nav-text">缓存预热</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#缓存预热解决方案"><span class="nav-number">1.1.</span> <span class="nav-text">缓存预热解决方案</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#缓存雪崩"><span class="nav-number">2.</span> <span class="nav-text">缓存雪崩</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#问题排查"><span class="nav-number">2.1.</span> <span class="nav-text">问题排查</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#问题分析"><span class="nav-number">2.2.</span> <span class="nav-text">问题分析</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#解决方案（道）"><span class="nav-number">2.3.</span> <span class="nav-text">解决方案（道）</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#解决方案（术）"><span class="nav-number">2.4.</span> <span class="nav-text">解决方案（术）</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#缓存击穿"><span class="nav-number">3.</span> <span class="nav-text">缓存击穿</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#数据库服务器崩溃（2）"><span class="nav-number">3.1.</span> <span class="nav-text">数据库服务器崩溃（2）</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#问题排查-1"><span class="nav-number">3.2.</span> <span class="nav-text">问题排查</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#解决方案（术）-1"><span class="nav-number">3.3.</span> <span class="nav-text">解决方案（术）</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#缓存穿透"><span class="nav-number">4.</span> <span class="nav-text">缓存穿透</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#数据库服务器崩溃（3）"><span class="nav-number">4.1.</span> <span class="nav-text">数据库服务器崩溃（3）</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#问题排查-2"><span class="nav-number">4.2.</span> <span class="nav-text">问题排查</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#解决方法（术）"><span class="nav-number">4.3.</span> <span class="nav-text">解决方法（术）</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">Anthony</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">30</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">8</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">27</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 2016 – 
+  <span itemprop="copyrightYear">2021</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">Anthony</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> 强力驱动
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js"></script>
+  <script src="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/pisces.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+  <script>
+    (function(){
+      var canonicalURL, curProtocol;
+      //Get the <link> tag
+      var x=document.getElementsByTagName("link");
+		//Find the last canonical URL
+		if(x.length > 0){
+			for (i=0;i<x.length;i++){
+				if(x[i].rel.toLowerCase() == 'canonical' && x[i].href){
+					canonicalURL=x[i].href;
+				}
+			}
+		}
+    //Get protocol
+	    if (!canonicalURL){
+	    	curProtocol = window.location.protocol.split(':')[0];
+	    }
+	    else{
+	    	curProtocol = canonicalURL.split(':')[0];
+	    }
+      //Get current URL if the canonical URL does not exist
+	    if (!canonicalURL) canonicalURL = window.location.href;
+	    //Assign script content. Replace current URL with the canonical URL
+      !function(){var e=/([http|https]:\/\/[a-zA-Z0-9\_\.]+\.baidu\.com)/gi,r=canonicalURL,t=document.referrer;if(!e.test(r)){var n=(String(curProtocol).toLowerCase() === 'https')?"https://sp0.baidu.com/9_Q4simg2RQJ8t7jm9iCKT-xh_/s.gif":"//api.share.baidu.com/s.gif";t?(n+="?r="+encodeURIComponent(document.referrer),r&&(n+="&l="+r)):r&&(n+="?l="+r);var i=new Image;i.src=n}}(window);})();
+  </script>
+
+
+
+
+  
+<script src="/js/local-search.js"></script>
+
+
+
+
+  <script>
+    (function(d, w, c) {
+      w.ChatraID = 'EihoqJa35Kbyapqdo';
+      var s = d.createElement('script');
+      w[c] = w[c] || function() {
+        (w[c].q = w[c].q || []).push(arguments);
+      };
+      s.async = true;
+      s.src = 'https://call.chatra.io/chatra.js';
+      if (d.head) d.head.appendChild(s);
+    })(document, window, 'Chatra');
+  </script>
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+<script>
+  function loadCount() {
+    var d = document, s = d.createElement('script');
+    s.src = 'https://Anthony.disqus.com/count.js';
+    s.id = 'dsq-count-scr';
+    (d.head || d.body).appendChild(s);
+  }
+  // defer loading until the whole page loading is completed
+  window.addEventListener('load', loadCount, false);
+</script>
+<script>
+  var disqus_config = function() {
+    this.page.url = "https://yanganlin.com/2020/08/14/69.Redis%E5%88%A0%E9%99%A4%E7%AD%96%E7%95%A5/";
+    this.page.identifier = "2020/08/14/69.Redis删除策略/";
+    this.page.title = "Redis删除策略";
+    };
+  NexT.utils.loadComments(document.querySelector('#disqus_thread'), () => {
+    if (window.DISQUS) {
+      DISQUS.reset({
+        reload: true,
+        config: disqus_config
+      });
+    } else {
+      var d = document, s = d.createElement('script');
+      s.src = 'https://Anthony.disqus.com/embed.js';
+      s.setAttribute('data-timestamp', '' + +new Date());
+      (d.head || d.body).appendChild(s);
+    }
+  });
+</script>
+
+</body>
+</html>

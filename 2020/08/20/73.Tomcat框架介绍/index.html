@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.2.1">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+  <meta name="google-site-verification" content="UA-173930550-1">
+  <meta name="baidu-site-verification" content="YzvLjKFuD8DEm8Je">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.css">
+  <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/pace/1.0.2/themes/blue/pace-theme-minimal.min.css">
+  <script src="//cdnjs.cloudflare.com/ajax/libs/pace/1.0.2/pace.min.js"></script>
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"yanganlin.com","root":"/","scheme":"Gemini","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":true,"show_result":true,"style":"flat"},"back2top":{"enable":true,"sidebar":false,"scrollpercent":true},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":true,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},"path":"search.xml"};
+  </script>
+
+  <meta name="description" content="Tomcat架构Http请求处理 图1,表示HTTP服务器直接调用具体业务类，它们是紧耦合的。图2,HTTP服务器不直接调用业务类，而是把请求交给容器来处理，容器通过Servlet接口调用业务类。 因此Servlet接口和Servlet容器的出现，达到了HTTP服务器与业务类解耦的目的,Tomcat按照Servlet规范的要求实现了Servlet容器，同时它们也具有HTTP服务器的功能。 作为Ja">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Tomcat框架介绍">
+<meta property="og:url" content="https://yanganlin.com/2020/08/20/73.Tomcat%E6%A1%86%E6%9E%B6%E4%BB%8B%E7%BB%8D/index.html">
+<meta property="og:site_name" content="木木在唱歌">
+<meta property="og:description" content="Tomcat架构Http请求处理 图1,表示HTTP服务器直接调用具体业务类，它们是紧耦合的。图2,HTTP服务器不直接调用业务类，而是把请求交给容器来处理，容器通过Servlet接口调用业务类。 因此Servlet接口和Servlet容器的出现，达到了HTTP服务器与业务类解耦的目的,Tomcat按照Servlet规范的要求实现了Servlet容器，同时它们也具有HTTP服务器的功能。 作为Ja">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195916.png">
+<meta property="og:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195908.png">
+<meta property="og:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195900.png">
+<meta property="og:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195853.png">
+<meta property="og:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195845.png">
+<meta property="og:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195838.png">
+<meta property="og:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195532.png">
+<meta property="og:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195540.png">
+<meta property="article:published_time" content="2020-08-19T16:00:02.000Z">
+<meta property="article:modified_time" content="2021-07-01T13:17:56.421Z">
+<meta property="article:author" content="Anthony">
+<meta property="article:tag" content="源码">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195916.png">
+
+<link rel="canonical" href="https://yanganlin.com/2020/08/20/73.Tomcat%E6%A1%86%E6%9E%B6%E4%BB%8B%E7%BB%8D/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>Tomcat框架介绍 | 木木在唱歌</title>
+  
+    <script async src="https://www.googletagmanager.com/gtag/js?id=UA-173930550-1"></script>
+    <script>
+      if (CONFIG.hostname === location.hostname) {
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'UA-173930550-1');
+      }
+    </script>
+
+
+  <script>
+    var _hmt = _hmt || [];
+    (function() {
+      var hm = document.createElement("script");
+      hm.src = "https://hm.baidu.com/hm.js?f78a539021012b85bff6cabb7ad98ab4";
+      var s = document.getElementsByTagName("script")[0];
+      s.parentNode.insertBefore(hm, s);
+    })();
+  </script>
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">木木在唱歌</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+        <i class="fa fa-search fa-fw fa-lg"></i>
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-user fa-fw"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档</a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+</nav>
+
+
+
+  <div class="search-pop-overlay">
+    <div class="popup search-popup">
+        <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocapitalize="off"
+           placeholder="搜索..." spellcheck="false"
+           type="search" class="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result">
+  <div id="no-result">
+    <i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>
+  </div>
+</div>
+
+    </div>
+  </div>
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+  <div class="reading-progress-bar"></div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="https://yanganlin.com/2020/08/20/73.Tomcat%E6%A1%86%E6%9E%B6%E4%BB%8B%E7%BB%8D/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="Anthony">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="木木在唱歌">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Tomcat框架介绍
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-08-20 00:00:02" itemprop="dateCreated datePublished" datetime="2020-08-20T00:00:02+08:00">2020-08-20</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Tomcat/" itemprop="url" rel="index"><span itemprop="name">Tomcat</span></a>
+                </span>
+            </span>
+
+          
+  
+  <span class="post-meta-item">
+    
+      <span class="post-meta-item-icon">
+        <i class="far fa-comment"></i>
+      </span>
+      <span class="post-meta-item-text">Disqus：</span>
+    
+    <a title="disqus" href="/2020/08/20/73.Tomcat%E6%A1%86%E6%9E%B6%E4%BB%8B%E7%BB%8D/#disqus_thread" itemprop="discussionUrl">
+      <span class="post-comments-count disqus-comment-count" data-disqus-identifier="2020/08/20/73.Tomcat框架介绍/" itemprop="commentCount"></span>
+    </a>
+  </span>
+  
+  
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="Tomcat架构"><a href="#Tomcat架构" class="headerlink" title="Tomcat架构"></a>Tomcat架构</h1><h2 id="Http请求处理"><a href="#Http请求处理" class="headerlink" title="Http请求处理"></a>Http请求处理</h2><p><img src="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195916.png" alt=""></p>
+<p>图1,表示HTTP服务器直接调用具体业务类，它们是紧耦合的。<br>图2,HTTP服务器不直接调用业务类，而是把请求交给容器来处理，容器通过Servlet接口调用业务类。</p>
+<p>因此Servlet接口和Servlet容器的出现，达到了HTTP服务器与业务类解耦的目的,Tomcat按照Servlet规范的要求实现了Servlet容器，同时它们也具有HTTP服务器的功能。</p>
+<p>作为Java程序员，如果我们要实现新的业务功能，只需要实现一个Servlet，并把它注册到Tomcat（Servlet容器）中，剩下的事情就由Tomcat帮我们处理了。</p>
+<h2 id="Servlet容器工作流程"><a href="#Servlet容器工作流程" class="headerlink" title="Servlet容器工作流程"></a>Servlet容器工作流程</h2><p>为了解耦，HTTP服务器不直接调用Servlet，而是把请求交给Servlet容器来处理</p>
+<p><img src="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195908.png" alt=""></p>
+<h2 id="Tomcat整体架构"><a href="#Tomcat整体架构" class="headerlink" title="Tomcat整体架构"></a>Tomcat整体架构</h2><p>我们知道如果要设计一个系统，首先是要了解需求，我们已经了解了Tomcat要实现两个核心功能：<br>1） 处理Socket连接，负责网络字节流与Request和Response对象的转化。<br>2） 加载和管理Servlet，以及具体处理Request请求。<br>因此Tomcat设计了两个核心组件连接器（Connector）和容器（Container）来分别做这两件事情。连接器负责对外交流，容器负责内部处理。</p>
+<p><img src="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195900.png" alt=""></p>
+<h3 id="连接器-Coyote"><a href="#连接器-Coyote" class="headerlink" title="连接器 - Coyote"></a>连接器 - Coyote</h3><h4 id="架构介绍"><a href="#架构介绍" class="headerlink" title="架构介绍"></a>架构介绍</h4><p>Coyote 是Tomcat的连接器框架的名称 , 是Tomcat服务器提供的供客户端访问的外部接口。</p>
+<p>客户端通过Coyote与服务器建立连接、发送请求并接受响应 。</p>
+<p>Coyote 封装了底层的网络通信（Socket 请求及响应处理），为Catalina 容器提供了统一的接口，使Catalina 容器与具体的请求协议及IO操作方式完全解耦。</p>
+<p>Coyote 将Socket 输入转换封装为 Request 对象，交由Catalina 容器进行处理，处理请求完成后, Catalina 通过Coyote 提供的Response 对象将结果写入输出流 。</p>
+<p>Coyote 作为独立的模块，只负责具体协议和IO的相关操作， 与Servlet 规范实现没有直接关系，因此即便是 Request 和 Response 对象也并未实现Servlet规范对应的接口， 而是在Catalina 中将他们进一步封装为ServletRequest 和 ServletResponse </p>
+<p><img src="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195853.png" alt=""></p>
+<h4 id="IO-模型与协议"><a href="#IO-模型与协议" class="headerlink" title="IO 模型与协议"></a>IO 模型与协议</h4><p>在Coyote中 ， Tomcat支持的多种I/O模型和应用层协议，具体包含哪些IO模型和应用层协议，请看下表：<br>Tomcat 支持的IO模型（自8.5/9.0 版本起，Tomcat 移除了 对 BIO 的支持）：</p>
+<table>
+<thead>
+<tr>
+<th>IO 模型</th>
+<th>描述</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>NIO</td>
+<td>非阻塞I/O，采用Java NIO类库实现</td>
+</tr>
+<tr>
+<td>NIO2</td>
+<td>异步I/O，采用JDK 7最新的NIO2类库实现。</td>
+</tr>
+<tr>
+<td>APR</td>
+<td>采用Apache可移植运行库实现，是C/C++编写的本地库。如果选择该方<br/>案，需要单独安装APR库。</td>
+</tr>
+</tbody></table>
+<p>Tomcat 支持的应用层协议 ：<br>| IO 模型  | 描述                                                         |<br>| ——– | ———————————————————— |<br>| HTTP/1.1 | 这是大部分Web应用采用的访问协议。                            |<br>| AJP      | 用于和Web服务器集成（如Apache），以实现对静态资源的优化以及<br/>集群部署，当前支持AJP/1.3。 |<br>| HTTP/2   | HTTP 2.0大幅度的提升了Web性能。下一代HTTP协议 ， 自8.5以及9.0<br/>版本之后支持。 |</p>
+<p>在 8.0 之前 ， Tomcat 默认采用的I/O方式为 BIO ， 之后改为 NIO。 无论 NIO、NIO2还是 APR， 在性能方面均优于以往的BIO。 如果采用APR， 甚至可以达到 Apache HTTPServer 的影响性能。</p>
+<h4 id="连接器组件"><a href="#连接器组件" class="headerlink" title="连接器组件"></a>连接器组件</h4><p><img src="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195845.png" alt=""></p>
+<p>连接器中的各个组件的作用如下：</p>
+<h5 id="EndPoint"><a href="#EndPoint" class="headerlink" title="EndPoint"></a>EndPoint</h5><p>1） EndPoint ： Coyote 通信端点，即通信监听的接口，是具体Socket接收和发送处理器，是对传输层的抽象，因此EndPoint用来实现TCP/IP协议的。</p>
+<p>2） Tomcat 并没有EndPoint 接口，而是提供了一个抽象类AbstractEndpoint ， 里面定义了两个内部类：Acceptor和SocketProcessor。</p>
+<ul>
+<li><p>Acceptor用于监听Socket连接请求。</p>
+</li>
+<li><p>SocketProcessor用于处理接收到的Socket请求，它实现Runnable接口，在Run方法里调用协议处理组件Processor进行处理。为了提高处理能力，SocketProcessor被提交到线程池来执行。而这个线程池叫作执行器(Executor)</p>
+</li>
+</ul>
+<h5 id="Processor"><a href="#Processor" class="headerlink" title="Processor"></a>Processor</h5><p>Processor ： Coyote 协议处理接口 ，Processor接收来自EndPoint的Socket，读取字节流解析成Tomcat Request和Response对象，并通过Adapter将其提交到容器处理</p>
+<h5 id="ProtocolHandler"><a href="#ProtocolHandler" class="headerlink" title="ProtocolHandler"></a>ProtocolHandler</h5><p>ProtocolHandler ： Coyote 协议接口， 通过Endpoint 和 Processor ， 实现针对具体协议的处理能力。</p>
+<p>Tomcat 按照协议和I/O 提供了6个实现类 ： AjpNioProtocol ，AjpAprProtocol， AjpNio2Protocol ， Http11NioProtocol ，Http11Nio2Protocol ，Http11AprProtocol。</p>
+<p>我们在配置tomcat/conf/server.xml 时 ， 至少要指定具体的ProtocolHandler , 当然也可以指定协议名称 ， 如 ： HTTP/1.1 </p>
+<h5 id="Adapter"><a href="#Adapter" class="headerlink" title="Adapter"></a>Adapter</h5><p>由于协议不同，客户端发过来的请求信息也不尽相同，Tomcat定义了自己的Request类来“存放”这些请求信息。ProtocolHandler接口负责解析请求并生成Tomcat Request类。但是这个Request对象不是标准的ServletRequest，也就意味着，不能用Tomcat Request作为参数来调用容器。</p>
+<p>Tomcat设计者的解决方案是引入CoyoteAdapter，这是适配器模式的经典运用，连接器调用CoyoteAdapter的Sevice方法，传入的是TomcatRequest对象，CoyoteAdapter负责将Tomcat Request转成ServletRequest，再调用容器的Service方法</p>
+<h3 id="Container结构"><a href="#Container结构" class="headerlink" title="Container结构"></a>Container结构</h3><p>Tomcat设计了4种容器，分别是Engine、Host、Context和Wrapper。这4种容器不是平行关系，而是父子关系。， Tomcat通过一种分层的架构，使得Servlet容器具有很好的灵活性</p>
+<p><img src="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195838.png" alt=""></p>
+<table>
+<thead>
+<tr>
+<th>容器</th>
+<th>描述</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Engine</td>
+<td>标识整个Catalina的servlet引擎,用来管理多个虚拟站点,一个Service只能有一个Engine,但是可以有多个Host</td>
+</tr>
+<tr>
+<td>Host</td>
+<td>一个虚拟主机,或者说一个站点,可以给Tomcat配置多个虚拟主机地址,而一个虚拟主机下可包含多个Context</td>
+</tr>
+<tr>
+<td>Context</td>
+<td>表示一个Web应用程序,一个Context包含多个Wrapper</td>
+</tr>
+<tr>
+<td>Wrapper</td>
+<td>一个Wrapper标识一个Servlet</td>
+</tr>
+</tbody></table>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">Server</span>&gt;</span></span><br><span class="line">  <span class="tag">&lt;<span class="name">Service</span>&gt;</span></span><br><span class="line">    <span class="tag">&lt;<span class="name">Connector</span>/&gt;</span></span><br><span class="line">    <span class="tag">&lt;<span class="name">Connector</span>/&gt;</span></span><br><span class="line">    <span class="tag">&lt;<span class="name">Engine</span>&gt;</span></span><br><span class="line">      <span class="tag">&lt;<span class="name">Host</span>&gt;</span><span class="tag">&lt;/<span class="name">Host</span>&gt;</span></span><br><span class="line">    <span class="tag">&lt;/<span class="name">Engine</span>&gt;</span></span><br><span class="line">  <span class="tag">&lt;/<span class="name">Service</span>&gt;</span></span><br><span class="line"><span class="tag">&lt;/<span class="name">Server</span>&gt;</span></span><br></pre></td></tr></table></figure>
+
+<p>所有容器组件都实现了Container接口，因此组合模式可以使得用户对单容器对象和组合容器对象的使用具有一致性。这里单容器对象指的是最底层的Wrapper，组合容器对象指的是上面的Context、Host或者Engine。</p>
+<p><img src="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195532.png" alt=""></p>
+<h1 id="启动流程"><a href="#启动流程" class="headerlink" title="启动流程"></a>启动流程</h1><p><img src="https://raw.githubusercontent.com/YangAnLin/images/master/20200826195540.png" alt=""></p>
+<p>1.启动tomcat ， 需要调用 bin/startup.bat (在linux 目录下 , 需要调用 bin/startup.sh) 在startup.bat 脚本中, 调用了catalina.bat。</p>
+<p>2.在catalina.bat 脚本文件中，调用了BootStrap 中的main方法。</p>
+<p>3.在BootStrap 的main 方法中调用了 init 方法 ， 来创建Catalina 及 初始化类加载器。</p>
+<p>4.在BootStrap 的main 方法中调用了 load 方法 ， 在其中又调用了Catalina的load方法。</p>
+<p>5.在Catalina 的load 方法中 , 需要进行一些初始化的工作, 并需要构造Digester 对象, 用于解析 XML。<br>6.然后在调用后续组件的初始化操作 。。。加载Tomcat的配置文件，初始化容器组件 ，监听对应的端口号， 准备接受客户端请求</p>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"><i class="fa fa-tag"></i> 源码</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/08/20/72.Tomcat%E5%90%AF%E5%8A%A8%E5%92%8C%E6%BA%90%E7%A0%81%E5%90%AF%E5%8A%A8/" rel="prev" title="Tomcat启动和源码启动">
+      <i class="fa fa-chevron-left"></i> Tomcat启动和源码启动
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/08/20/74.Tomcat%E5%88%9D%E5%A7%8B%E5%8C%96%E6%B5%81%E7%A8%8B/" rel="next" title="Tomcat初始化流程">
+      Tomcat初始化流程 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+    
+  <div class="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the comments powered by Disqus.</noscript>
+    </div>
+  </div>
+  
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#Tomcat架构"><span class="nav-number">1.</span> <span class="nav-text">Tomcat架构</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#Http请求处理"><span class="nav-number">1.1.</span> <span class="nav-text">Http请求处理</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Servlet容器工作流程"><span class="nav-number">1.2.</span> <span class="nav-text">Servlet容器工作流程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Tomcat整体架构"><span class="nav-number">1.3.</span> <span class="nav-text">Tomcat整体架构</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#连接器-Coyote"><span class="nav-number">1.3.1.</span> <span class="nav-text">连接器 - Coyote</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#架构介绍"><span class="nav-number">1.3.1.1.</span> <span class="nav-text">架构介绍</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#IO-模型与协议"><span class="nav-number">1.3.1.2.</span> <span class="nav-text">IO 模型与协议</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#连接器组件"><span class="nav-number">1.3.1.3.</span> <span class="nav-text">连接器组件</span></a><ol class="nav-child"><li class="nav-item nav-level-5"><a class="nav-link" href="#EndPoint"><span class="nav-number">1.3.1.3.1.</span> <span class="nav-text">EndPoint</span></a></li><li class="nav-item nav-level-5"><a class="nav-link" href="#Processor"><span class="nav-number">1.3.1.3.2.</span> <span class="nav-text">Processor</span></a></li><li class="nav-item nav-level-5"><a class="nav-link" href="#ProtocolHandler"><span class="nav-number">1.3.1.3.3.</span> <span class="nav-text">ProtocolHandler</span></a></li><li class="nav-item nav-level-5"><a class="nav-link" href="#Adapter"><span class="nav-number">1.3.1.3.4.</span> <span class="nav-text">Adapter</span></a></li></ol></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Container结构"><span class="nav-number">1.3.2.</span> <span class="nav-text">Container结构</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#启动流程"><span class="nav-number">2.</span> <span class="nav-text">启动流程</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">Anthony</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">30</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">8</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">27</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 2016 – 
+  <span itemprop="copyrightYear">2021</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">Anthony</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> 强力驱动
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js"></script>
+  <script src="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/pisces.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+  <script>
+    (function(){
+      var canonicalURL, curProtocol;
+      //Get the <link> tag
+      var x=document.getElementsByTagName("link");
+		//Find the last canonical URL
+		if(x.length > 0){
+			for (i=0;i<x.length;i++){
+				if(x[i].rel.toLowerCase() == 'canonical' && x[i].href){
+					canonicalURL=x[i].href;
+				}
+			}
+		}
+    //Get protocol
+	    if (!canonicalURL){
+	    	curProtocol = window.location.protocol.split(':')[0];
+	    }
+	    else{
+	    	curProtocol = canonicalURL.split(':')[0];
+	    }
+      //Get current URL if the canonical URL does not exist
+	    if (!canonicalURL) canonicalURL = window.location.href;
+	    //Assign script content. Replace current URL with the canonical URL
+      !function(){var e=/([http|https]:\/\/[a-zA-Z0-9\_\.]+\.baidu\.com)/gi,r=canonicalURL,t=document.referrer;if(!e.test(r)){var n=(String(curProtocol).toLowerCase() === 'https')?"https://sp0.baidu.com/9_Q4simg2RQJ8t7jm9iCKT-xh_/s.gif":"//api.share.baidu.com/s.gif";t?(n+="?r="+encodeURIComponent(document.referrer),r&&(n+="&l="+r)):r&&(n+="?l="+r);var i=new Image;i.src=n}}(window);})();
+  </script>
+
+
+
+
+  
+<script src="/js/local-search.js"></script>
+
+
+
+
+  <script>
+    (function(d, w, c) {
+      w.ChatraID = 'EihoqJa35Kbyapqdo';
+      var s = d.createElement('script');
+      w[c] = w[c] || function() {
+        (w[c].q = w[c].q || []).push(arguments);
+      };
+      s.async = true;
+      s.src = 'https://call.chatra.io/chatra.js';
+      if (d.head) d.head.appendChild(s);
+    })(document, window, 'Chatra');
+  </script>
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+<script>
+  function loadCount() {
+    var d = document, s = d.createElement('script');
+    s.src = 'https://Anthony.disqus.com/count.js';
+    s.id = 'dsq-count-scr';
+    (d.head || d.body).appendChild(s);
+  }
+  // defer loading until the whole page loading is completed
+  window.addEventListener('load', loadCount, false);
+</script>
+<script>
+  var disqus_config = function() {
+    this.page.url = "https://yanganlin.com/2020/08/20/73.Tomcat%E6%A1%86%E6%9E%B6%E4%BB%8B%E7%BB%8D/";
+    this.page.identifier = "2020/08/20/73.Tomcat框架介绍/";
+    this.page.title = "Tomcat框架介绍";
+    };
+  NexT.utils.loadComments(document.querySelector('#disqus_thread'), () => {
+    if (window.DISQUS) {
+      DISQUS.reset({
+        reload: true,
+        config: disqus_config
+      });
+    } else {
+      var d = document, s = d.createElement('script');
+      s.src = 'https://Anthony.disqus.com/embed.js';
+      s.setAttribute('data-timestamp', '' + +new Date());
+      (d.head || d.body).appendChild(s);
+    }
+  });
+</script>
+
+</body>
+</html>
